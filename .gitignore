@@ -1,0 +1,18 @@
+# Swift / SwiftPM
+.build/
+.swiftpm/
+*.o
+*.dSYM/
+
+# Vendored ONNX Runtime: ~44MB dylib, restored by Scripts/fetch-onnxruntime.sh
+vendor/
+
+# Packaged app
+dist/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+*.iml

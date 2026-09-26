@@ -1,0 +1,7 @@
+// The ONNX Runtime C API, exposed to Swift. Headers and dylib come from
+// vendor/onnxruntime, populated by Scripts/fetch-onnxruntime.sh.
+module COnnxRuntime {
+    header "../../vendor/onnxruntime/include/onnxruntime_c_api.h"
+    link "onnxruntime"
+    export *
+}
