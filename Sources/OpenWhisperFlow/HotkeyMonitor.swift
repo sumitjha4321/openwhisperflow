@@ -21,6 +21,9 @@ public final class HotkeyMonitor {
     /// Modifier flags are reported as a whole word, so the previous held state
     /// is tracked to turn them into discrete down/up events.
     private var modifierWasHeld = false
+    /// True between a delivered `.down` and its matching `.up`, so an
+    /// interrupted tap can tell whether it left a recording running.
+    private var isDownDelivered = false
 
     public init(trigger: HotkeyTrigger, suppressTriggerKey: Bool) {
         self.trigger = trigger
@@ -77,12 +80,14 @@ public final class HotkeyMonitor {
         tap = nil
         runLoopSource = nil
         modifierWasHeld = false
+        isDownDelivered = false
     }
 
     public func update(trigger: HotkeyTrigger, suppressTriggerKey: Bool) {
         self.trigger = trigger
         self.suppressTriggerKey = suppressTriggerKey
         modifierWasHeld = false
+        isDownDelivered = false
     }
 
     private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
@@ -90,6 +95,7 @@ public final class HotkeyMonitor {
         // re-enabling keeps the hotkey alive for the rest of the session.
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
+            recoverFromInterruption()
             return Unmanaged.passUnretained(event)
         }
 
@@ -121,9 +127,27 @@ public final class HotkeyMonitor {
         return suppressTriggerKey ? nil : passThrough
     }
 
+    /// Clears the state that a disabled tap may have invalidated.
+    ///
+    /// Events that arrived while the tap was off are gone for good, and the one
+    /// that matters is the trigger's release. Without it a modifier is left
+    /// looking held, which makes the guard above swallow the next press, and a
+    /// recording it started keeps running until the duration cap. Synthesising
+    /// the release undoes both.
+    ///
+    /// If the key really is still down, its eventual real release is ignored —
+    /// `modifierWasHeld` already reads as up — and the press after that starts
+    /// a recording normally.
+    private func recoverFromInterruption() {
+        modifierWasHeld = false
+        guard isDownDelivered else { return }
+        deliver(.up)
+    }
+
     private enum Edge { case down, up }
 
     private func deliver(_ edge: Edge) {
+        isDownDelivered = edge == .down
         // The tap callback runs on the run loop it was added to; hop explicitly
         // so downstream state is only ever touched on the main queue.
         DispatchQueue.main.async { [weak self] in

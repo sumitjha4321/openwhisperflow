@@ -48,6 +48,12 @@ public final class DictationController: ObservableObject {
     private var recordingTimer: Timer?
     /// Deferred microphone teardown after a tap that did not start recording.
     private var pendingMicStandDown: DispatchWorkItem?
+    /// Bumped once per dictation.
+    ///
+    /// Transcription is asynchronous, so the next recording can already be
+    /// under way by the time a result arrives. The generation a result was
+    /// started with says whether it still owns the overlay and the status.
+    private var dictationGeneration = 0
 
     private var preferences: Preferences { PreferencesStore.shared.current }
 
@@ -279,6 +285,7 @@ public final class DictationController: ObservableObject {
         }
 
         recorder.confirm()
+        dictationGeneration += 1
         recordingStarted = Date()
         status = .recording
         if preferences.showOverlay {
@@ -333,6 +340,7 @@ public final class DictationController: ObservableObject {
             overlay.show(.transcribing)
         }
 
+        let generation = dictationGeneration
         Task { [weak self] in
             let result: Result<String, Error>
             do {
@@ -340,21 +348,31 @@ public final class DictationController: ObservableObject {
             } catch {
                 result = .failure(error)
             }
-            await MainActor.run { self?.finishTranscription(result) }
+            await MainActor.run { self?.finishTranscription(result, generation: generation) }
         }
     }
 
-    private func finishTranscription(_ result: Result<String, Error>) {
+    /// - Parameter generation: the dictation this result belongs to. If another
+    ///   recording has started in the meantime the text is still delivered, but
+    ///   the overlay and the status are left alone: they now describe the
+    ///   recording in progress, and overwriting them would replace the live
+    ///   pill with a transient notice that then hides itself, leaving the user
+    ///   recording with nothing on screen to say so.
+    private func finishTranscription(_ result: Result<String, Error>, generation: Int) {
+        let isCurrent = generation == dictationGeneration
+
         switch result {
         case .failure(let error):
+            guard isCurrent else { return }
             status = .failed("\(error)")
             overlay.show(.failure(message: "Transcription failed: \(error)"), autoHideAfter: 4)
 
         case .success(let raw):
             let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            status = computedStatus()
+            if isCurrent { status = computedStatus() }
 
             guard !text.isEmpty else {
+                guard isCurrent else { return }
                 if preferences.showOverlay {
                     overlay.show(.failure(message: "No speech detected"), autoHideAfter: 2)
                 } else {
@@ -381,6 +399,7 @@ public final class DictationController: ObservableObject {
             if current.playSounds {
                 NSSound(named: "Pop")?.play()
             }
+            guard isCurrent else { return }
             if current.showOverlay {
                 let message = notes.isEmpty ? "Transcribed" : notes.joined(separator: " · ")
                 overlay.show(.success(message: message), autoHideAfter: 1.6)

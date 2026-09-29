@@ -41,6 +41,13 @@ final class OverlayController {
     func updateRecording(seconds: Double) {
         guard case .recording = model.state else { return }
         model.state = .recording(seconds: seconds)
+        // A recording is the one state that has to stay on screen for as long
+        // as it lasts, so if anything has ordered the panel out from under it
+        // — a space change, another process taking the display — put it back
+        // rather than leave the microphone open with nothing to show for it.
+        if let panel, !panel.isVisible {
+            panel.orderFrontRegardless()
+        }
     }
 
     func hide() {
