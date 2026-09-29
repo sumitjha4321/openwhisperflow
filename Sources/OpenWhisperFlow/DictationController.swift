@@ -368,6 +368,7 @@ public final class DictationController: ObservableObject {
             overlay.show(.failure(message: "Transcription failed: \(error)"), autoHideAfter: 4)
 
         case .success(let raw):
+            owfLog("TRANSCRIPT gen=\(generation) current=\(isCurrent) raw=\"\(raw)\"")
             let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             if isCurrent { status = computedStatus() }
 

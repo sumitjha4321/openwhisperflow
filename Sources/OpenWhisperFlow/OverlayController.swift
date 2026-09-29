@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import DictationCore
 
 /// Owns the floating status pill.
 ///
@@ -29,6 +30,7 @@ final class OverlayController {
         ensurePanel()
         reposition()
         panel?.orderFrontRegardless()
+        owfLog("OVERLAY show state=\(state) frame=\(panel?.frame ?? .zero) visible=\(panel?.isVisible ?? false)")
 
         if let delay {
             let work = DispatchWorkItem { [weak self] in self?.hide() }
@@ -46,6 +48,7 @@ final class OverlayController {
         // — a space change, another process taking the display — put it back
         // rather than leave the microphone open with nothing to show for it.
         if let panel, !panel.isVisible {
+            owfLog("OVERLAY re-ordering front mid-recording")
             panel.orderFrontRegardless()
         }
     }

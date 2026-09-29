@@ -30,6 +30,7 @@ public final class AudioRecorder {
         commonFormat: .pcmFormatFloat32, sampleRate: MoonshineModel.sampleRate,
         channels: 1, interleaved: false)!
 
+    private var bufferCount = 0
     private let lock = NSLock()
     private var samples: [Float] = []
     private var capturing = false
@@ -68,6 +69,9 @@ public final class AudioRecorder {
             throw RecorderError.engineUnavailable("cannot convert \(inputFormat.sampleRate) Hz input to 16 kHz")
         }
         self.converter = converter
+        owfLog("DEVICE engine-input=\(Self.currentInputDeviceName(engine: engine)) system-default=\(Self.defaultInputDeviceName())")
+        owfLog("INPUT fmt=\(inputFormat) sr=\(inputFormat.sampleRate) ch=\(inputFormat.channelCount) common=\(inputFormat.commonFormat.rawValue) inter=\(inputFormat.isInterleaved)")
+        owfLog("TARGET fmt=\(targetFormat) sr=\(targetFormat.sampleRate) ch=\(targetFormat.channelCount)")
 
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 2048, format: inputFormat) { [weak self] buffer, _ in
@@ -75,8 +79,10 @@ public final class AudioRecorder {
         }
 
         engine.prepare()
+        owfLog("engine.prepare done; inputNode.inputFormat=\(input.inputFormat(forBus: 0)) outputFormat=\(input.outputFormat(forBus: 0))")
         do {
             try engine.start()
+            owfLog("engine.start OK running=\(engine.isRunning)")
         } catch {
             input.removeTap(onBus: 0)
             lock.lock(); capturing = false; lock.unlock()
@@ -105,6 +111,13 @@ public final class AudioRecorder {
         lock.lock()
         defer { lock.unlock() }
         let captured = samples
+        let maxAbs = captured.map { abs($0) }.max() ?? 0
+        let meanAbs = captured.isEmpty ? 0 : captured.map { abs($0) }.reduce(0,+) / Float(captured.count)
+        captured.withUnsafeBufferPointer { buf in
+            let d = Data(buffer: buf)
+            try? d.write(to: URL(fileURLWithPath: "/tmp/owf-capture.f32"))
+        }
+        owfLog("FINISH frames=\(captured.count) secs=\(String(format: "%.2f", Double(captured.count)/16000)) maxAbs=\(maxAbs) meanAbs=\(meanAbs)")
         samples.removeAll(keepingCapacity: false)
         capturing = false
         confirmed = false
@@ -140,6 +153,12 @@ public final class AudioRecorder {
         let frames = Int(output.frameLength)
         let incoming = UnsafeBufferPointer(start: channel, count: frames)
         let level = AudioChunker.rms(ArraySlice(incoming))
+        bufferCount += 1
+        if bufferCount % 10 == 1 {
+            let inCh = buffer.floatChannelData?[0]
+            let inMax = inCh == nil ? -1 : (0..<Int(buffer.frameLength)).map { abs(inCh![$0]) }.max() ?? 0
+            owfLog("BUF #\(bufferCount) inFrames=\(buffer.frameLength) inMaxAbs=\(inMax) outFrames=\(frames) rms=\(level)")
+        }
 
         lock.lock()
         if capturing {
@@ -164,6 +183,41 @@ public final class AudioRecorder {
     public var capturedSeconds: Double {
         lock.lock(); defer { lock.unlock() }
         return Double(samples.count) / MoonshineModel.sampleRate
+    }
+
+    /// Name of the device the engine's input AudioUnit is actually pulling from.
+    static func currentInputDeviceName(engine: AVAudioEngine) -> String {
+        guard let unit = engine.inputNode.audioUnit else { return "(no audio unit)" }
+        var deviceID = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let err = AudioUnitGetProperty(
+            unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &deviceID, &size)
+        guard err == noErr else { return "(err \(err))" }
+        return "\(name(of: deviceID)) [id \(deviceID)]"
+    }
+
+    static func defaultInputDeviceName() -> String {
+        var deviceID = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        let err = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID)
+        guard err == noErr else { return "(err \(err))" }
+        return "\(name(of: deviceID)) [id \(deviceID)]"
+    }
+
+    private static func name(of deviceID: AudioDeviceID) -> String {
+        var cfName: CFString = "" as CFString
+        var size = UInt32(MemoryLayout<CFString>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioObjectPropertyName,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        let err = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &cfName)
+        return err == noErr ? (cfName as String) : "(unnamed)"
     }
 
     public static func requestMicrophoneAccess() async -> Bool {
