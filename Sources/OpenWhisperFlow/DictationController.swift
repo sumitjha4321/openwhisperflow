@@ -54,6 +54,10 @@ public final class DictationController: ObservableObject {
     /// under way by the time a result arrives. The generation a result was
     /// started with says whether it still owns the overlay and the status.
     private var dictationGeneration = 0
+    /// Polls for a permission granted while the app is running. System
+    /// Settings sends no notification, and the Permissions tab only checks
+    /// while it is on screen.
+    private var permissionWatch: Timer?
 
     private var preferences: Preferences { PreferencesStore.shared.current }
 
@@ -83,6 +87,19 @@ public final class DictationController: ObservableObject {
         refreshStatus()
         startMonitoringIfPossible()
         Task { await refreshInstallState(loadIfReady: true) }
+        watchPermissionsIfNeeded()
+    }
+
+    private func watchPermissionsIfNeeded() {
+        guard permissionWatch == nil, !Permissions.allGranted else { return }
+        permissionWatch = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, Permissions.allGranted else { return }
+                self.permissionWatch?.invalidate()
+                self.permissionWatch = nil
+                self.recheck()
+            }
+        }
     }
 
     /// Attaches the global key tap. Returns false if Accessibility is missing.
@@ -414,5 +431,6 @@ public final class DictationController: ObservableObject {
     public func recheck() {
         startMonitoringIfPossible()
         Task { await refreshInstallState(loadIfReady: true) }
+        watchPermissionsIfNeeded()
     }
 }
