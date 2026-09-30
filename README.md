@@ -103,9 +103,15 @@ Two ways in that do not depend on menu bar space:
 ### Signing and the Accessibility grant
 
 macOS keys the Accessibility grant to the app's code signature, so
-`Scripts/make-app.sh` signs with the first `Apple Development` or
-`Developer ID Application` certificate in your keychain. That makes the
-signature identity stable across rebuilds and the permission sticks.
+`Scripts/make-app.sh` signs with a `Developer ID Application` certificate if
+your keychain has one, and an `Apple Development` certificate otherwise. That
+makes the signature identity stable across rebuilds and the permission sticks.
+
+Developer ID is preferred because releases are signed with it. A dev build and
+the installed release share one Accessibility toggle, but the grant only
+matches the certificate it was made for — so a dev build signed with a
+different certificate leaves the other copy untrusted while the toggle still
+reads "on".
 
 Without a certificate the script falls back to an ad-hoc signature, which
 changes on every build — macOS then forgets the grant each time. Either way, if

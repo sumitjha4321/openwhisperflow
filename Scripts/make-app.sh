@@ -92,9 +92,18 @@ TIMESTAMP_FLAG="${TIMESTAMP_FLAG:---timestamp=none}"
 # grant to the code signature. A real certificate keeps that identity stable
 # across rebuilds, so the permission survives; an ad-hoc signature changes every
 # build and makes macOS forget. Prefer a certificate, fall back to ad-hoc.
+#
+# Developer ID comes first because releases are signed with it. Dev and release
+# builds share a bundle identifier, so System Settings shows them as one toggle,
+# but the grant only matches the certificate it was made for — a dev build
+# signed with Apple Development would leave the installed release untrusted
+# while the toggle still reads "on".
 if [[ -z "${SIGN_IDENTITY:-}" ]]; then
-  SIGN_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
-    | awk -F'"' '/Developer ID Application|Apple Development/ { print $2; exit }')"
+  IDENTITIES="$(security find-identity -v -p codesigning 2>/dev/null)"
+  for KIND in "Developer ID Application" "Apple Development"; do
+    SIGN_IDENTITY="$(awk -F'"' -v kind="$KIND" 'index($2, kind) == 1 { print $2; exit }' <<<"$IDENTITIES")"
+    [[ -n "$SIGN_IDENTITY" ]] && break
+  done
 fi
 if [[ -z "$SIGN_IDENTITY" ]]; then
   SIGN_IDENTITY="-"
