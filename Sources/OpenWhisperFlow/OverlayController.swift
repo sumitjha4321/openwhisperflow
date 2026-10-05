@@ -29,7 +29,7 @@ final class OverlayController {
         model.state = state
         ensurePanel()
         reposition()
-        panel?.orderFrontRegardless()
+        orderFrontOnActiveSpace()
         owfLog("OVERLAY show state=\(state) frame=\(panel?.frame ?? .zero) visible=\(panel?.isVisible ?? false)")
 
         if let delay {
@@ -47,10 +47,29 @@ final class OverlayController {
         // as it lasts, so if anything has ordered the panel out from under it
         // — a space change, another process taking the display — put it back
         // rather than leave the microphone open with nothing to show for it.
-        if let panel, !panel.isVisible {
-            owfLog("OVERLAY re-ordering front mid-recording")
-            panel.orderFrontRegardless()
+        if let panel, !panel.isVisible || !panel.isOnActiveSpace {
+            owfLog("OVERLAY re-ordering front mid-recording visible=\(panel.isVisible) activeSpace=\(panel.isOnActiveSpace)")
+            orderFrontOnActiveSpace()
         }
+    }
+
+    /// Orders the panel in, rebuilding it if it does not land on the space the
+    /// user is looking at.
+    ///
+    /// A long-lived panel can lose its all-spaces membership — seen after the
+    /// app had been running for days — and from then on the window server keeps
+    /// it on the ordinary desktop only. AppKit still reports it as visible, so
+    /// over a full-screen app the pill is simply missing. A freshly created
+    /// panel joins every space again.
+    private func orderFrontOnActiveSpace() {
+        panel?.orderFrontRegardless()
+        guard let stale = panel, !stale.isOnActiveSpace else { return }
+        owfLog("OVERLAY panel not on active space; rebuilding")
+        stale.orderOut(nil)
+        panel = nil
+        ensurePanel()
+        reposition()
+        panel?.orderFrontRegardless()
     }
 
     func hide() {
